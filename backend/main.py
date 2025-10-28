@@ -98,10 +98,17 @@ def on_startup():
     create_db_and_tables()
 
 
-    create_index_if_not_exists()
-
-    with Session(engine) as db: 
-        initial_indexing(db) # <--- Truyền Session vào hàm
+    import time
+    for i in range(10):
+        try:
+            create_index_if_not_exists()
+            with Session(engine) as db: 
+                initial_indexing(db)
+            print("✅ Elasticsearch initialized successfully")
+            break
+        except Exception as e:
+            print(f"🔄 Attempt {i+1}: ES not ready, retrying...")
+            time.sleep(5)
 
 @app.get("/")
 def root():

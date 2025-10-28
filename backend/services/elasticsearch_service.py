@@ -12,8 +12,8 @@ HEADERS = {'Content-Type': 'application/json', 'Accept': 'application/vnd.elasti
 ES_CLIENT = Elasticsearch(
     ES_HOST,
     # headers=HEADERS # Thêm header vào đây
-)
 
+)
 
 
 ROOM_INDEX_NAME = "rooms"
@@ -26,8 +26,8 @@ ROOM_MAPPING = {
 
             "analyzer": {
                 "vi_analyzer": {
-                    "tokenizer": "icu_tokenizer",
-                    "filter": ["icu_folding", "lowercase"] 
+                    "tokenizer": "standard",
+                    "filter": ["lowercase", "asciifolding"]
                 }
             }
         }
@@ -37,16 +37,18 @@ ROOM_MAPPING = {
             "id": {"type": "keyword"},
 
             # ĐỊA CHỈ: SỬA TỪ keyword -> text ĐỂ SEARCH ĐƯỢC
-            "province": {"type": "text", "analyzer": "vi_analyzer", "boost": 6},  # BOOST CAO NHẤT
-            "district": {"type": "text", "analyzer": "vi_analyzer", "boost": 8},   # BOOST CAO
-            "ward": {"type": "text", "analyzer": "vi_analyzer", "boost": 10},       # BOOST CAO
+            "province": {"type": "text", "analyzer": "vi_analyzer"},  # BOOST CAO NHẤT
+            "district": {"type": "text", "analyzer": "vi_analyzer"},   # BOOST CAO
+            "ward": {"type": "text", "analyzer": "vi_analyzer"},       # BOOST CAO
             
-            "title": {"type": "text", "analyzer": "vi_analyzer", "boost": 5}, 
-            "description": {"type": "text", "analyzer": "vi_analyzer", "boost": 4}, 
-            "search_combined": {"type": "text", "analyzer": "vi_analyzer", "boost": 3}
+            "title": {"type": "text", "analyzer": "vi_analyzer"}, 
+            "description": {"type": "text", "analyzer": "vi_analyzer"}, 
+            "search_combined": {"type": "text", "analyzer": "vi_analyzer"}
         }
     }
 }
+
+
 
 
 
