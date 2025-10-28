@@ -2,8 +2,9 @@ from elasticsearch import Elasticsearch
 from sqlmodel import Session, select
 from models.models import Room # Giả định Room model của bạn nằm ở đây
 from typing import List, Dict, Any
+import os
 
-ES_HOST = "http://localhost:9200"
+ES_HOST = os.getenv("ELASTICSEARCH_URL", "http://localhost:9200")
 
 
 HEADERS = {'Content-Type': 'application/json', 'Accept': 'application/vnd.elasticsearch+json; compatible-with=7'}

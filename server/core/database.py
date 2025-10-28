@@ -1,9 +1,13 @@
 # core/database.py
 from sqlmodel import SQLModel, create_engine, Session
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+import os 
 
-DATABASE_URL = "postgresql://user:28092004@localhost:7001/trending_db"
-ASYNC_DATABASE_URL = "postgresql+asyncpg://user:28092004@localhost:7001/trending_db"
+# DATABASE_URL = "postgresql://user:28092004@localhost:7001/trending_db"
+# ASYNC_DATABASE_URL = "postgresql+asyncpg://user:28092004@localhost:7001/trending_db"
+
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:28092004@localhost:7001/trending_db")
+ASYNC_DATABASE_URL = os.getenv("ASYNC_DATABASE_URL", "postgresql+asyncpg://user:28092004@localhost:7001/trending_db")
 
 engine = create_engine(DATABASE_URL, echo=True)
 async_engine = create_async_engine(ASYNC_DATABASE_URL, echo=True)
