@@ -4,7 +4,7 @@ from models.models import Room # Giả định Room model của bạn nằm ở 
 from typing import List, Dict, Any
 import os
 
-ES_HOST = os.getenv("ELASTICSEARCH_URL", "http://localhost:9200")
+ES_HOST = os.getenv("ELASTICSEARCH_URL", "http://elasticsearch:9200")
 
 
 HEADERS = {'Content-Type': 'application/json', 'Accept': 'application/vnd.elasticsearch+json; compatible-with=7'}
