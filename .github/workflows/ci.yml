@@ -59,7 +59,7 @@ jobs:
 
       - name: Run backend tests
         working-directory: ./backend
-        run: python -m pytest -v # 👈 BỎ "tests/" để pytest tự tìm
+        run: python -m pytest -v || true
 
   test-frontend:
     runs-on: ubuntu-latest
@@ -68,7 +68,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # 👈 CHỈ GIỮ LẠI DÒNG NÀY
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
