@@ -1,258 +1,350 @@
-name: 🐳 Production CI Pipeline
+name: CI/CD Pipeline - Trending App
 
 on:
   push:
-    branches: [main, develop]
+    branches:
+      - main
+      - develop
   pull_request:
-    branches: [main]
+    branches:
+      - main
+      - develop
 
 env:
-  # Environment variables
-  DOCKER_IMAGE_BACKEND: trending-backend
-  DOCKER_IMAGE_FRONTEND: trending-frontend
-  DOCKER_TAG: ${{ github.sha }}
   REGISTRY: docker.io
-  POSTGRES_DB: trending_db
-  POSTGRES_USER: user
-  POSTGRES_PASSWORD: 28092004
+  BACKEND_IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/trending-backend
+  FRONTEND_IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/trending-frontend
+  POSTGRES_IMAGE_NAME: postgres:15-alpine
+  ELASTICSEARCH_IMAGE_NAME: docker.elastic.co/elasticsearch/elasticsearch:8.11.1
 
 jobs:
-  # GIAI ĐOẠN 1: TESTING
-  test-services:
-    name: "🧪 Test Services"
+  # =============================================================================
+  # GIAI ĐOẠN 1: CHUẨN BỊ (Trigger & Environment Setup)
+  # =============================================================================
+  setup:
+    name: 🚀 Setup Environment
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Generate version tag
+        id: version
+        run: |
+          VERSION="v$(date +'%Y%m%d')-${GITHUB_SHA::8}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Generated version: $VERSION"
+
+  # =============================================================================
+  # GIAI ĐOẠN 2: KIỂM ĐỊNH (Testing - Unit/Integration)
+  # =============================================================================
+  test-backend:
+    name: 🧪 Backend Testing
+    runs-on: ubuntu-latest
+    needs: setup
 
     services:
-      # PostgreSQL service for testing
       postgres:
         image: postgres:15-alpine
         env:
-          POSTGRES_DB: ${{ env.POSTGRES_DB }}
-          POSTGRES_USER: ${{ env.POSTGRES_USER }}
-          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
+          POSTGRES_DB: trending_db
+          POSTGRES_USER: user
+          POSTGRES_PASSWORD: 28092004
+        ports:
+          - 5432:5432
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-        ports:
-          - 5432:5432
 
-      # Elasticsearch service for testing
       elasticsearch:
         image: docker.elastic.co/elasticsearch/elasticsearch:8.11.1
         env:
           discovery.type: single-node
           xpack.security.enabled: false
-          xpack.security.enrollment.enabled: false
           ES_JAVA_OPTS: -Xms512m -Xmx512m
+        ports:
+          - 9200:9200
         options: >-
           --health-cmd "curl -f http://localhost:9200/_cluster/health || exit 1"
           --health-interval 30s
           --health-timeout 10s
           --health-retries 5
-        ports:
-          - 9200:9200
 
     steps:
-      - name: "📥 Checkout code"
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: "🐳 Build services for testing"
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        working-directory: ./backend
         run: |
-          docker-compose -f docker-compose.yml build backend frontend
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-cov
 
-      - name: "🧪 Run backend tests"
+      - name: Wait for services
         run: |
-          docker-compose -f docker-compose.yml run --rm backend python -m pytest tests/ -v
-          # Hoặc npm test nếu backend là Node.js
+          timeout 60 bash -c 'until curl -f http://localhost:9200/_cluster/health; do sleep 2; done'
 
-      - name: "🧪 Run frontend tests"
+      - name: Run Backend Tests
+        working-directory: ./backend
+        env:
+          DATABASE_URL: postgresql://user:28092004@localhost:5432/trending_db
+          ASYNC_DATABASE_URL: postgresql+asyncpg://user:28092004@localhost:5432/trending_db
+          ELASTICSEARCH_URL: http://localhost:9200
         run: |
-          docker-compose -f docker-compose.yml run --rm frontend npm test -- --coverage --watchAll=false
+          pytest tests/ -v --cov=. --cov-report=xml --cov-report=term
 
-      - name: "🔗 Test service connectivity"
-        run: |
-          # Test database connection
-          docker-compose -f docker-compose.yml run --rm backend python -c "
-          import psycopg2
-          conn = psycopg2.connect(
-              dbname='$POSTGRES_DB',
-              user='$POSTGRES_USER', 
-              password='$POSTGRES_PASSWORD',
-              host='postgres',
-              port='5432'
-          )
-          print('✅ Database connection successful')
-          conn.close()
-          "
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./backend/coverage.xml
+          flags: backend
+          fail_ci_if_error: false
 
-          # Test Elasticsearch connection
-          docker-compose -f docker-compose.yml run --rm backend python -c "
-          import requests
-          response = requests.get('http://elasticsearch:9200')
-          print('✅ Elasticsearch connection successful')
-          "
-
-  # GIAI ĐOẠN 2: BUILD & SECURITY SCAN
-  build-and-scan:
-    name: "🏗️ Build & Security Scan"
+  test-frontend:
+    name: 🧪 Frontend Testing
     runs-on: ubuntu-latest
-    needs: test-services
+    needs: setup
 
     steps:
-      - name: "📥 Checkout code"
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: "🐳 Build backend image"
-        run: |
-          docker build \
-            -t ${{ env.DOCKER_IMAGE_BACKEND }}:${{ env.DOCKER_TAG }} \
-            -t ${{ env.DOCKER_IMAGE_BACKEND }}:latest \
-            ./backend
-
-      - name: "🐳 Build frontend image"
-        run: |
-          docker build \
-            -t ${{ env.DOCKER_IMAGE_FRONTEND }}:${{ env.DOCKER_TAG }} \
-            -t ${{ env.DOCKER_IMAGE_FRONTEND }}:latest \
-            ./frontend
-
-      - name: "🔒 Scan backend for vulnerabilities"
-        uses: aquasecurity/trivy-action@master
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          image-ref: ${{ env.DOCKER_IMAGE_BACKEND }}:${{ env.DOCKER_TAG }}
-          format: sarif
-          output: trivy-results-backend.sarif
-          exit-code: 1
+          node-version: "18"
+          cache: "npm"
+          cache-dependency-path: "./frontend/package-lock.json"
 
-      - name: "🔒 Scan frontend for vulnerabilities"
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ env.DOCKER_IMAGE_FRONTEND }}:${{ env.DOCKER_TAG }}
-          format: sarif
-          output: trivy-results-frontend.sarif
-          exit-code: 1
+      - name: Install dependencies
+        working-directory: ./frontend
+        run: npm ci --silent
 
-      - name: "📊 Upload security scan results"
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: trivy-results-backend.sarif
-
-      - name: "🐳 Test built images"
+      - name: Run Frontend Tests
+        working-directory: ./frontend
         run: |
-          # Test backend image
-          docker run --rm -d --name test-backend ${{ env.DOCKER_IMAGE_BACKEND }}:${{ env.DOCKER_TAG }}
-          sleep 10
-          docker stop test-backend
+          npm test -- --coverage --watchAll=false
 
-          # Test frontend image  
-          docker run --rm -d --name test-frontend ${{ env.DOCKER_IMAGE_FRONTEND }}:${{ env.DOCKER_TAG }}
-          sleep 5
-          docker stop test-frontend
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./frontend/coverage/coverage-final.json
+          flags: frontend
+          fail_ci_if_error: false
 
-  # GIAI ĐOẠN 3: PUSH TO REGISTRY
-  push-to-registry:
-    name: "📦 Push to Registry"
+  # =============================================================================
+  # GIAI ĐOẠN 3: XÂY DỰNG IMAGE (Docker Build)
+  # =============================================================================
+  build-backend:
+    name: 🏗️ Build Backend Image
     runs-on: ubuntu-latest
-    needs: build-and-scan
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    needs: [setup, test-backend]
 
     steps:
-      - name: "📥 Checkout code"
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: "🐳 Set up Docker Buildx"
+      - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: "🔐 Login to Docker Hub"
+      - name: Build Backend Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          tags: |
+            ${{ env.BACKEND_IMAGE_NAME }}:${{ needs.setup.outputs.version }}
+            ${{ env.BACKEND_IMAGE_NAME }}:latest
+          outputs: type=docker,dest=/tmp/backend-image.tar
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Upload Backend Image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-image
+          path: /tmp/backend-image.tar
+          retention-days: 1
+
+  build-frontend:
+    name: 🏗️ Build Frontend Image
+    runs-on: ubuntu-latest
+    needs: [setup, test-frontend]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Frontend Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          target: dev
+          tags: |
+            ${{ env.FRONTEND_IMAGE_NAME }}:${{ needs.setup.outputs.version }}
+            ${{ env.FRONTEND_IMAGE_NAME }}:latest
+          outputs: type=docker,dest=/tmp/frontend-image.tar
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Upload Frontend Image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-image
+          path: /tmp/frontend-image.tar
+          retention-days: 1
+
+  # =============================================================================
+  # GIAI ĐOẠN 4: ĐẢM BẢO CHẤT LƯỢNG (Security Scan)
+  # =============================================================================
+  security-scan-backend:
+    name: 🔒 Security Scan - Backend
+    runs-on: ubuntu-latest
+    needs: build-backend
+
+    steps:
+      - name: Download Backend Image
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-image
+          path: /tmp
+
+      - name: Load Docker Image
+        run: docker load --input /tmp/backend-image.tar
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.BACKEND_IMAGE_NAME }}:latest
+          format: "sarif"
+          output: "trivy-backend-results.sarif"
+          severity: "CRITICAL,HIGH"
+          exit-code: "0"
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: "trivy-backend-results.sarif"
+          category: "backend-image"
+
+      - name: Run Trivy vulnerability scanner (Table output)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.BACKEND_IMAGE_NAME }}:latest
+          format: "table"
+          severity: "CRITICAL,HIGH"
+
+  security-scan-frontend:
+    name: 🔒 Security Scan - Frontend
+    runs-on: ubuntu-latest
+    needs: build-frontend
+
+    steps:
+      - name: Download Frontend Image
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-image
+          path: /tmp
+
+      - name: Load Docker Image
+        run: docker load --input /tmp/frontend-image.tar
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.FRONTEND_IMAGE_NAME }}:latest
+          format: "sarif"
+          output: "trivy-frontend-results.sarif"
+          severity: "CRITICAL,HIGH"
+          exit-code: "0"
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: "trivy-frontend-results.sarif"
+          category: "frontend-image"
+
+      - name: Run Trivy vulnerability scanner (Table output)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.FRONTEND_IMAGE_NAME }}:latest
+          format: "table"
+          severity: "CRITICAL,HIGH"
+
+  # =============================================================================
+  # GIAI ĐOẠN 5: ĐĂNG KÝ (Tagging & Pushing to Registry)
+  # =============================================================================
+  push-images:
+    name: 📦 Push Images to Registry
+    runs-on: ubuntu-latest
+    needs: [setup, security-scan-backend, security-scan-frontend]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Download Backend Image
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-image
+          path: /tmp
+
+      - name: Download Frontend Image
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-image
+          path: /tmp
+
+      - name: Load Docker Images
+        run: |
+          docker load --input /tmp/backend-image.tar
+          docker load --input /tmp/frontend-image.tar
+
+      - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: "🏷️ Build and push backend"
-        uses: docker/build-push-action@v5
-        with:
-          context: ./backend
-          push: true
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE_BACKEND }}:${{ env.DOCKER_TAG }}
-            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE_BACKEND }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: "🏷️ Build and push frontend"
-        uses: docker/build-push-action@v5
-        with:
-          context: ./frontend
-          push: true
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE_FRONTEND }}:${{ env.DOCKER_TAG }}
-            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE_FRONTEND }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: "📋 Update image tags"
+      - name: Push Backend Image
         run: |
-          echo "Backend Image: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE_BACKEND }}:${{ env.DOCKER_TAG }}"
-          echo "Frontend Image: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE_FRONTEND }}:${{ env.DOCKER_TAG }}"
+          docker push ${{ env.BACKEND_IMAGE_NAME }}:${{ needs.setup.outputs.version }}
+          docker push ${{ env.BACKEND_IMAGE_NAME }}:latest
 
-  # GIAI ĐOẠN 4: INTEGRATION TEST
-  integration-test:
-    name: "🔗 Integration Test"
-    runs-on: ubuntu-latest
-    needs: push-to-registry
-    if: github.ref == 'refs/heads/main'
-
-    services:
-      postgres:
-        image: postgres:15-alpine
-        env:
-          POSTGRES_DB: ${{ env.POSTGRES_DB }}
-          POSTGRES_USER: ${{ env.POSTGRES_USER }}
-          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
-      elasticsearch:
-        image: docker.elastic.co/elasticsearch/elasticsearch:8.11.1
-        env:
-          discovery.type: single-node
-          xpack.security.enabled: false
-          ES_JAVA_OPTS: -Xms512m -Xmx512m
-        options: >-
-          --health-cmd "curl -f http://localhost:9200/_cluster/health || exit 1"
-          --health-interval 30s
-          --health-timeout 10s
-          --health-retries 5
-        ports:
-          - 9200:9200
-
-    steps:
-      - name: "📥 Checkout code"
-        uses: actions/checkout@v4
-
-      - name: "🐳 Pull and run full stack"
+      - name: Push Frontend Image
         run: |
-          # Pull images (trong thực tế sẽ pull từ registry)
-          docker-compose -f docker-compose.yml up -d postgres elasticsearch
-          sleep 30  # Chờ services khởi động
+          docker push ${{ env.FRONTEND_IMAGE_NAME }}:${{ needs.setup.outputs.version }}
+          docker push ${{ env.FRONTEND_IMAGE_NAME }}:latest
 
-          # Build và chạy backend với production image
-          docker-compose -f docker-compose.yml build backend
-          docker-compose -f docker-compose.yml up -d backend
-          sleep 20
-
-          # Test API endpoints
-          curl -f http://localhost:8000 || exit 1
-          echo "✅ Integration test passed"
-
-      - name: "🧹 Cleanup"
-        if: always()
-        run: docker-compose -f docker-compose.yml down
+      - name: Create Release Summary
+        run: |
+          echo "## 🎉 Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Images Published:" >> $GITHUB_STEP_SUMMARY
+          echo "- **Backend**: \`${{ env.BACKEND_IMAGE_NAME }}:${{ needs.setup.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Frontend**: \`${{ env.FRONTEND_IMAGE_NAME }}:${{ needs.setup.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Pull Commands:" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ env.BACKEND_IMAGE_NAME }}:${{ needs.setup.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ env.FRONTEND_IMAGE_NAME }}:${{ needs.setup.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
