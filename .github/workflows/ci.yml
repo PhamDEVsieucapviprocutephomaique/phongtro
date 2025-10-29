@@ -62,7 +62,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: ./frontend
-        run: npm ci --silent
+        run: npm install --silent
 
       - name: Run Frontend Tests
         working-directory: ./frontend
