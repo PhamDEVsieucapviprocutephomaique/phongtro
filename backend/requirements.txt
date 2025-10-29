@@ -7,3 +7,4 @@ uvicorn[standard]==0.29.0
 psycopg2-binary  
 asyncpg  
 fastapi-users[sqlalchemy] 
+pytest>=7.0.0
