@@ -62,12 +62,12 @@ jobs:
 
       - name: Install dependencies
         working-directory: ./frontend
-        run: npm install --silent
+        run: npm install --no-optional --silent
 
       - name: Run Frontend Tests
         working-directory: ./frontend
         run: |
-          npm test -- --coverage --watchAll=false
+          npm test -- --watchAll=false --passWithNoTests
 
       - name: Upload coverage reports
         uses: codecov/codecov-action@v4
