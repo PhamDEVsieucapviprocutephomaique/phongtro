@@ -44,8 +44,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          submodules: true
-          fetch-depth: 0
+          fetch-depth: 0 # 👈 CHỈ GIỮ LẠI DÒNG NÀY
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -60,11 +59,7 @@ jobs:
 
       - name: Run backend tests
         working-directory: ./backend
-        run: python -m pytest tests/ -v
-        env:
-          DATABASE_URL: postgresql://user:28092004@localhost:5432/trending_db
-          ASYNC_DATABASE_URL: postgresql+asyncpg://user:28092004@localhost:5432/trending_db
-          ELASTICSEARCH_URL: http://localhost:9200
+        run: python -m pytest -v # 👈 BỎ "tests/" để pytest tự tìm
 
   test-frontend:
     runs-on: ubuntu-latest
@@ -73,8 +68,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          submodules: true
-          fetch-depth: 0
+          fetch-depth: 0 # 👈 CHỈ GIỮ LẠI DÒNG NÀY
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -97,8 +91,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          submodules: true
-          fetch-depth: 0
+          fetch-depth: 0 # 👈 CHỈ GIỮ LẠI DÒNG NÀY
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
