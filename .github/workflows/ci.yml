@@ -44,7 +44,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # 👈 CHỈ GIỮ LẠI DÒNG NÀY
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -106,4 +106,4 @@ jobs:
 
       - name: Test docker-compose
         run: |
-          docker-compose -f docker-compose.yml build
+          docker compose -f docker compose.yml build
