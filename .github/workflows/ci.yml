@@ -1,0 +1,260 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  DOCKER_IMAGE_BACKEND: trending-backend
+  DOCKER_IMAGE_FRONTEND: trending-frontend
+  DOCKER_TAG: ${{ github.sha }}
+  REGISTRY: docker.io
+  POSTGRES_DB: trending_db
+  POSTGRES_USER: user
+  POSTGRES_PASSWORD: 28092004
+
+jobs:
+  test-services:
+    name: "Test Services"
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: ${{ env.POSTGRES_DB }}
+          POSTGRES_USER: ${{ env.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 7001:5432
+
+      elasticsearch:
+        image: docker.elastic.co/elasticsearch/elasticsearch:8.11.1
+        env:
+          discovery.type: single-node
+          xpack.security.enabled: false
+          xpack.security.enrollment.enabled: false
+          ES_JAVA_OPTS: -Xms512m -Xmx512m
+        options: >-
+          --health-cmd "curl -f http://localhost:9200/_cluster/health || exit 1"
+          --health-interval 30s
+          --health-timeout 10s
+          --health-retries 5
+        ports:
+          - 9200:9200
+
+    steps:
+      - name: "Checkout code"
+        uses: actions/checkout@v4
+
+      - name: "Build services for testing"
+        run: |
+          docker-compose -f docker-compose.yml build backend frontend
+
+      - name: "Run backend tests"
+        run: |
+          docker-compose -f docker-compose.yml run --rm backend python -m pytest tests/ -v
+
+      - name: "Run frontend tests"
+        run: |
+          docker-compose -f docker-compose.yml run --rm frontend npm test -- --coverage --watchAll=false
+
+      - name: "Test service connectivity"
+        run: |
+          pip install psycopg2-binary requests
+
+          python -c "
+          import psycopg2
+          conn = psycopg2.connect(
+              dbname='${{ env.POSTGRES_DB }}',
+              user='${{ env.POSTGRES_USER }}', 
+              password='${{ env.POSTGRES_PASSWORD }}',
+              host='localhost',
+              port='7001'
+          )
+          print('Database connection from HOST successful')
+          conn.close()
+          "
+
+          python -c "
+          import requests
+          response = requests.get('http://localhost:9200/_cluster/health')
+          print('Elasticsearch connection from HOST successful')
+          "
+
+  build-and-scan:
+    name: "Build & Security Scan"
+    runs-on: ubuntu-latest
+    needs: test-services
+
+    steps:
+      - name: "Checkout code"
+        uses: actions/checkout@v4
+
+      - name: "Build backend image"
+        run: |
+          docker build \
+            -t ${{ env.DOCKER_IMAGE_BACKEND }}:${{ env.DOCKER_TAG }} \
+            -t ${{ env.DOCKER_IMAGE_BACKEND }}:latest \
+            ./backend
+
+      - name: "Build frontend image"
+        run: |
+          docker build \
+            -t ${{ env.DOCKER_IMAGE_FRONTEND }}:${{ env.DOCKER_TAG }} \
+            -t ${{ env.DOCKER_IMAGE_FRONTEND }}:latest \
+            ./frontend
+
+      - name: "Scan backend for vulnerabilities"
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.DOCKER_IMAGE_BACKEND }}:${{ env.DOCKER_TAG }}
+          format: sarif
+          output: trivy-results-backend.sarif
+          exit-code: 1
+
+      - name: "Scan frontend for vulnerabilities"
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.DOCKER_IMAGE_FRONTEND }}:${{ env.DOCKER_TAG }}
+          format: sarif
+          output: trivy-results-frontend.sarif
+          exit-code: 1
+
+      - name: "Upload security scan results"
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results-backend.sarif
+
+      - name: "Test built images"
+        run: |
+          docker run --rm -d --name test-backend ${{ env.DOCKER_IMAGE_BACKEND }}:${{ env.DOCKER_TAG }}
+          sleep 10
+          docker stop test-backend
+
+          docker run --rm -d --name test-frontend ${{ env.DOCKER_IMAGE_FRONTEND }}:${{ env.DOCKER_TAG }}
+          sleep 5
+          docker stop test-frontend
+
+  push-to-registry:
+    name: "Push to Registry"
+    runs-on: ubuntu-latest
+    needs: build-and-scan
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+
+    steps:
+      - name: "Checkout code"
+        uses: actions/checkout@v4
+
+      - name: "Set up Docker Buildx"
+        uses: docker/setup-buildx-action@v3
+
+      - name: "Login to Docker Hub"
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: "Build and push backend"
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE_BACKEND }}:${{ env.DOCKER_TAG }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE_BACKEND }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: "Build and push frontend"
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE_FRONTEND }}:${{ env.DOCKER_TAG }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE_FRONTEND }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: "Update image tags"
+        run: |
+          echo "Backend Image: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE_BACKEND }}:${{ env.DOCKER_TAG }}"
+          echo "Frontend Image: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE_FRONTEND }}:${{ env.DOCKER_TAG }}"
+
+  integration-test:
+    name: "Integration Test"
+    runs-on: ubuntu-latest
+    needs: push-to-registry
+    if: github.ref == 'refs/heads/main'
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: ${{ env.POSTGRES_DB }}
+          POSTGRES_USER: ${{ env.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 7001:5432
+
+      elasticsearch:
+        image: docker.elastic.co/elasticsearch/elasticsearch:8.11.1
+        env:
+          discovery.type: single-node
+          xpack.security.enabled: false
+          ES_JAVA_OPTS: -Xms512m -Xmx512m
+        options: >-
+          --health-cmd "curl -f http://localhost:9200/_cluster/health || exit 1"
+          --health-interval 30s
+          --health-timeout 10s
+          --health-retries 5
+        ports:
+          - 9200:9200
+
+    steps:
+      - name: "Checkout code"
+        uses: actions/checkout@v4
+
+      - name: "Test full stack integration"
+        run: |
+          docker-compose up -d
+          sleep 30
+
+          docker exec trending_backend python -c "
+          import requests
+          import psycopg2
+          import os
+
+          conn = psycopg2.connect(
+              dbname=os.getenv('POSTGRES_DB'),
+              user=os.getenv('POSTGRES_USER'), 
+              password=os.getenv('POSTGRES_PASSWORD'),
+              host='postgres',
+              port='5432'
+          )
+          print('Database connection from INSIDE container successful')
+          conn.close()
+
+          response = requests.get('http://elasticsearch:9200/_cluster/health')
+          print('Elasticsearch connection from INSIDE container successful')
+
+          response = requests.get('http://localhost:8000/')
+          print('Backend health check passed')
+          "
+
+      - name: "Cleanup"
+        if: always()
+        run: docker-compose down
