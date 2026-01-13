@@ -2,7 +2,7 @@
 aws_region         = "ap-southeast-1"
 environment        = "staging"
 cluster_name       = "my-app-staging-eks"
-kubernetes_version = "1.28"
+kubernetes_version = "1.30"
 
 # Network
 vpc_cidr             = "10.0.0.0/16"

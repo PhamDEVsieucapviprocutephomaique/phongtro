@@ -1,0 +1,14 @@
+kind: ConfigMap
+metadata:
+  name: frontend-config
+  namespace: staging
+data:
+  REACT_APP_API_URL: "http://backend-service"
+
+  NODE_ENV: "staging"
+
+  REACT_APP_ENABLE_ANALYTICS: "false"
+  REACT_APP_ENABLE_DEBUG: "true"
+
+  REACT_APP_CDN_URL: "https://staging-cdn.yourdomain.com"
+# demo het credit ko xai dc nua

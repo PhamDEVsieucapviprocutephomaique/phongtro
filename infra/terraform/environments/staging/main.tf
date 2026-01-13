@@ -48,3 +48,35 @@ module "eks" {
 
   depends_on = [module.vpc]
 }
+
+
+module "rds" {
+  source = "../../modules/rds" 
+
+  environment         = var.environment
+  vpc_id              = module.vpc.vpc_id
+  vpc_cidr            = module.vpc.vpc_cidr
+  private_subnet_ids  = module.vpc.private_subnet_ids
+
+  instance_class      = "db.t3.micro"
+  allocated_storage   = 20
+  database_name       = "phongtro_db"
+  database_username   = "dbadmin"
+
+  # Staging settings
+  multi_az            = false
+  deletion_protection = false
+  skip_final_snapshot = true
+
+  depends_on = [module.vpc]
+}
+
+# S3 Module
+module "s3" {
+  source = "../../modules/s3"
+
+  environment      = var.environment
+  bucket_name      = "phongtro-app"
+  enable_versioning = true
+  allowed_origins   = ["*"]  # Trong production: ["https://yourdomain.com"]
+}
