@@ -1,0 +1,53 @@
+infra-aws-ad/
+.infra-aws-ad
+.infra-aws-ad/
+infra-aws-ad/
+/infra-aws-ad
+
+
+
+
+
+
+# --- TERRAFORM ---
+# Loại bỏ thư mục cài đặt provider và module
+.terraform/
+# Loại bỏ file trạng thái (chứa thông tin nhạy cảm về hạ tầng)
+*.tfstate
+*.tfstate.*
+# Loại bỏ file lock (tùy chọn, thường nên bỏ nếu làm lab cá nhân)
+.terraform.lock.hcl
+# Loại bỏ file biến tự định nghĩa
+*.tfvars
+*.tfvars.json
+
+# --- BACKEND (Python/FastAPI) ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+.env
+
+# --- FRONTEND (Node/React/Next) ---
+node_modules/
+.next/
+out/
+build/
+dist/
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# --- HỆ ĐIỀU HÀNH & IDE ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# --- KUBERNETES ---
+# Tuyệt đối không đẩy file config của cụm K8s lên Git
+kubeconfig
+*.log

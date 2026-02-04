@@ -1,8 +1,0 @@
-git
-github
-docker-workflow
-kubernetes
-aws-credentials
-pipeline-aws
-workflow-aggregator
-blueocean
