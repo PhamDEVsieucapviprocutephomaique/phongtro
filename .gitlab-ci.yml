@@ -1,0 +1,39 @@
+stages:
+  - build
+  - deploy
+
+variables:
+  ACR_URL: myuniqueregistry2026.azurecr.io
+  FE_IMAGE: $ACR_URL/phongtro-frontend:$CI_COMMIT_SHORT_SHA
+  BE_IMAGE: $ACR_URL/phongtro-backend:$CI_COMMIT_SHORT_SHA
+
+build_images:
+  stage: build
+  image: docker:24.0.5
+  services:
+    - docker:24.0.5-dind
+  before_script:
+    - echo "$ACR_PASSWORD" | docker login $ACR_URL -u "$ACR_USERNAME" --password-stdin
+  script:
+    - docker build -t $BE_IMAGE ./backend
+    - docker build -t $FE_IMAGE ./frontend
+    - docker push $BE_IMAGE
+    - docker push $FE_IMAGE
+
+deploy_to_aks:
+  stage: deploy
+  image: bitnami/kubectl:latest
+  script:
+    - export KUBECONFIG=$KUBECONFIG
+    - CONTEXT_NAME=$(kubectl config get-contexts -o name | head -n 1)
+    - kubectl config use-context $CONTEXT_NAME
+
+    # Chỉ trỏ vào folder k8s nằm trong infra-azuze
+    - kubectl apply -f infra-azuze/k8s/
+
+    # Cập nhật ảnh cho Deployment (tên container/deployment lấy đúng từ file YAML ông gửi)
+    - kubectl set image deployment/backend-deployment backend-app=$BE_IMAGE
+    - kubectl set image deployment/frontend-deployment frontend-app=$FE_IMAGE
+
+    - kubectl rollout status deployment/backend-deployment
+    - kubectl rollout status deployment/frontend-deployment
